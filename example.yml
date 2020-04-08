@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Stack for complete deployment of Metaflow
+Transform: AWS::Serverless-2016-10-31
 
 Parameters:
   SagemakerInstance: 
