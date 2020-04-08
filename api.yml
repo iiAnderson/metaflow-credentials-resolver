@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Stack for deployment of Credentials Automator API
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+
+  ConfigAutomatorLambdaPath:
+    Type: String
+  ArtifactBucket:
+    Type: String
+  MetaflowStack:
+    Type: String
+Resources:
+
+  ServerlessRestApi:
+    Type: AWS::Serverless::Api
+    DeletionPolicy: "Retain"
+
+  ApiUsagePlan:
+    Condition: 'EnableAuth'
+    Type: "AWS::ApiGateway::UsagePlan"
+    DependsOn:
+      - Api
+      - ApiDeployment
+    Properties:
+      ApiStages: 
+      - ApiId: !Ref Api
+        Stage: api
+      - ApiId: !Ref ServerlessRestApi
+        Stage: Prod
+      UsagePlanName: !Join ["", [{"Ref": "AWS::StackName"}, "-usage-plan"]]
+
+  ConfigAutomatorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+              AWS: !Ref AWS::AccountId
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: CloudwatchLoggingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:GetLogEvents
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+        - PolicyName: DescribeCloudformationStacksPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: "*"
+
+  ConfigAutomatorLambda:
+    Properties:
+        Handler: lambda_handler.lambda_handler
+        Runtime: python3.6
+        Timeout: 20
+        CodeUri:
+          Bucket: !Ref ArtifactBucket
+          Key: !Ref ConfigAutomatorLambdaPath
+        FunctionName: !Sub ${AWS::StackName}-creator
+        Environment:
+          Variables:
+            METAFLOW_STACK: !Ref MetaflowStack
+        Role: !GetAtt ConfigAutomatorLambdaRole.Arn
+        Events:
+          ConfigCreatorApi:
+            Type: Api
+            Properties:
+              Path: /config
+              Method: get
+              Auth:
+                ApiKeyRequired: true
+              RestApiId:
+                Ref: ServerlessRestApi  
+
+    Type: 'AWS::Serverless::Function' 
