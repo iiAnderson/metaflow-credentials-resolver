@@ -895,7 +895,7 @@ Resources:
       State: ENABLED
       Priority: 1
       JobQueueName: !Join [ "-", [ 'job-queue', !Ref 'AWS::StackName' ] ]
-  # Config Automator API
+  # 2.1 Config Automator API
   ServerlessRestApi:
     Type: AWS::Serverless::Api
     DeletionPolicy: "Retain"
@@ -965,7 +965,7 @@ Resources:
       ApiStages: 
       - ApiId: !Ref Api
         Stage: api
-        # Config Automator Stage within Usage plan (gets to use to API_KEY)
+        # 2.2 Config Automator Stage within Usage plan (gets to use to API_KEY)
       - ApiId: !Ref ServerlessRestApi
         Stage: Prod
       UsagePlanName: !Join ["", [{"Ref": "AWS::StackName"}, "-usage-plan"]]
@@ -979,7 +979,7 @@ Resources:
       KeyId: !Ref ApiKey
       KeyType: API_KEY
       UsagePlanId: !Ref ApiUsagePlan
-  #Config Automator Lambda
+  # 2.3 Config Automator Lambda
   ConfigAutomatorLambdaRole:
     Type: AWS::IAM::Role
     Properties:
