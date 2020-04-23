@@ -8,7 +8,7 @@ from exception import LambdaException
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-cloudformation_client = boto3.client('cloudformation')
+cloudformation_client = boto3.client('cloudformation', region_name='eu-west-1')
 
 METAFLOW_STACK = os.environ['METAFLOW_STACK']
 
@@ -59,15 +59,10 @@ class ConfigFactory():
 
         try:
 
-            params = self._get_stack_output(_stack_name, stack_output_mappings.keys())
+            params = self._get_stack_output(self._stack_name, self._stack_output_mappings)
 
         except:
             raise LambdaException("Not found", 404)
-
-        transformed = {}
-
-        for key, value in params.items():
-            transformed[self._stack_output_mappings[key]] = value
 
         # Concatenate objects
         return {
@@ -75,7 +70,7 @@ class ConfigFactory():
                 "METAFLOW_DEFAULT_DATASTORE": "s3",
                 "METAFLOW_DEFAULT_METADATA": "service"
             },
-            **transformed,
+            **params,
             **{
                 "METAFLOW_SERVICE_AUTH_KEY": self._api_key
             }
@@ -94,9 +89,8 @@ class ConfigFactory():
         if 'Outputs' in stack_outputs:
 
             for output in stack_outputs['Outputs']:
-                if output['OutputKey'] in params:
+                if output['OutputKey'] in list(params.keys()):
 
-                    index = params.index(output['OutputKey'])
-                    vals[params[index]] = output['OutputValue']
+                    vals[params[output['OutputKey']]] = output['OutputValue']
 
         return vals
