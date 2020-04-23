@@ -10,11 +10,77 @@ Parameters:
     Type: String
   MetaflowStack:
     Type: String
+  MetaflowApiKey:
+    Type: String
+  APIBasicAuth:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['false', 'true']
+    Description: 'Enable basic auth for API Gateway? (requires key export)'
+
+Conditions:
+  EnableAuth: !Equals [ !Ref APIBasicAuth, 'true']
+
 Resources:
 
-  ServerlessRestApi:
-    Type: AWS::Serverless::Api
-    DeletionPolicy: "Retain"
+  Api:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name: !Sub ${AWS::StackName}-credentials-resolver
+      Description: "Metaflow Credentials Automator API"
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: 'creds'
+      RestApiId: !Ref Api
+
+  ApiRouteMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      AuthorizationType: "NONE"
+      ApiKeyRequired: true
+      HttpMethod: "GET"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        Type: "AWS_PROXY"
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations"
+          - lambdaArn: !GetAtt "ConfigAutomatorLambda.Arn"
+      ResourceId: !Ref ApiGatewayResource
+      RestApiId: !Ref "Api"
+
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'apigateway.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: !GetAtt ConfigAutomatorLambda.Arn
+
+  ApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - "ApiRouteMethod"
+    Properties:
+      RestApiId: !Ref "Api"
+      StageName: "api"
 
   ApiUsagePlan:
     Condition: 'EnableAuth'
@@ -26,9 +92,41 @@ Resources:
       ApiStages: 
       - ApiId: !Ref Api
         Stage: api
-      - ApiId: !Ref ServerlessRestApi
-        Stage: Prod
       UsagePlanName: !Join ["", [{"Ref": "AWS::StackName"}, "-usage-plan"]]
+
+  ApiUsagePlanKey:
+    Condition: 'EnableAuth'
+    Type: "AWS::ApiGateway::UsagePlanKey"
+    DependsOn:
+      - Api
+      - ApiDeployment
+    Properties:
+      KeyId: !Ref MetaflowApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref ApiUsagePlan
+
+  ConfigAutomatorLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref ConfigAutomatorLambdaPath
+      FunctionName: !Sub ${AWS::StackName}-creator
+      Handler:  handler.lambda_handler
+      Role: !GetAtt ConfigAutomatorLambdaRole.Arn
+      Runtime: python3.6
+      Timeout: 20
+      Environment:
+        Variables:
+          METAFLOW_STACK: !Ref MetaflowStack
+
+  ApiGatewayLambdaInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt "ConfigAutomatorLambda.Arn"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/GET/"
 
   ConfigAutomatorLambdaRole:
     Type: AWS::IAM::Role
@@ -63,28 +161,6 @@ Resources:
                   - cloudformation:DescribeStacks
                 Resource: "*"
 
-  ConfigAutomatorLambda:
-    Properties:
-        Handler: lambda_handler.lambda_handler
-        Runtime: python3.6
-        Timeout: 20
-        CodeUri:
-          Bucket: !Ref ArtifactBucket
-          Key: !Ref ConfigAutomatorLambdaPath
-        FunctionName: !Sub ${AWS::StackName}-creator
-        Environment:
-          Variables:
-            METAFLOW_STACK: !Ref MetaflowStack
-        Role: !GetAtt ConfigAutomatorLambdaRole.Arn
-        Events:
-          ConfigCreatorApi:
-            Type: Api
-            Properties:
-              Path: /config
-              Method: get
-              Auth:
-                ApiKeyRequired: true
-              RestApiId:
-                Ref: ServerlessRestApi  
-
-    Type: 'AWS::Serverless::Function' 
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/api"
